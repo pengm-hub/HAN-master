@@ -55,7 +55,7 @@ def sample_mask(idx, l):
     return np.array(mask, dtype=np.bool)
 
 
-def load_data_dblp(path='data/api/{}/Apis_2_811.mat'.format(cates)):
+def load_data_dblp(path='data/api/{}/Apis_811.mat'.format(cates)):
     data = sio.loadmat(path)
     truelabels, truefeatures = data['label'], data['feature'].astype(float)
     N = truefeatures.shape[0]
