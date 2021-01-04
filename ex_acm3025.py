@@ -9,13 +9,13 @@ from utils import process
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
-
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = False
-
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.9)
+config = tf.ConfigProto(gpu_options=gpu_options, log_device_placement=True)
+# config.gpu_options.allow_growth = False
+cates = 5
 dataset = 'api'
 featype = 'fea'
-checkpt_file = 'pre_trained/{}/{}_allMP_multi_{}_.ckpt'.format(dataset, dataset, featype)
+checkpt_file = 'pre_trained/{}/{}/{}_allMP_multi_{}_.ckpt'.format(dataset, cates, dataset, featype)
 print('model: {}'.format(checkpt_file))
 # training params
 batch_size = 1
@@ -55,7 +55,7 @@ def sample_mask(idx, l):
     return np.array(mask, dtype=np.bool)
 
 
-def load_data_dblp(path='data/api/10/Apis_811_des.mat'):
+def load_data_dblp(path='data/api/{}/Apis_2_811.mat'.format(cates)):
     data = sio.loadmat(path)
     truelabels, truefeatures = data['label'], data['feature'].astype(float)
     N = truefeatures.shape[0]
@@ -94,12 +94,6 @@ adj_list, fea_list, y_train, y_val, y_test, train_mask, val_mask, test_mask = lo
 print("featype:", featype)
 if featype == 'adj':
     fea_list = adj_list
-
-
-
-import scipy.sparse as sp
-
-
 
 
 nb_nodes = fea_list[0].shape[0]
@@ -154,10 +148,6 @@ with tf.Graph().as_default():
     loss = model.masked_softmax_cross_entropy(log_resh, lab_resh, msk_resh)
     accuracy, predict, label = model.masked_accuracy(log_resh, lab_resh, msk_resh)
 
-    # precision, recall, fmeasure！！！！！！！！！！！！！！！！！！！！！！！！！！
-    # precision, recall, fmeasure,
-    # predicted, labels, argmax_pre, argmax_lab = model.micro_f1(log_resh, lab_resh, msk_resh)
-
     # optimzie
     train_op = model.training(loss, lr, l2_coef)
 
@@ -171,181 +161,138 @@ with tf.Graph().as_default():
     curr_step = 0
 
     with tf.Session(config=config) as sess:
-        sess.run(init_op)
-
-        train_loss_avg = 0
-        train_acc_avg = 0
-        val_loss_avg = 0
-        val_acc_avg = 0
-
-        # add！！！！！！！！！！！！！！
-        # train_pre_avg = 0
-        # train_rec_avg = 0
-        # train_f1_avg = 0
-        # val_pre_avg = 0
-        # val_rec_avg = 0
-        # val_f1_avg = 0
-
-        for epoch in range(nb_epochs):
-            tr_step = 0
-           
-            tr_size = fea_list[0].shape[0]
-            # ================   training    ============
-            while tr_step * batch_size < tr_size:
-
-                fd1 = {i: d[tr_step * batch_size:(tr_step + 1) * batch_size]
-                       for i, d in zip(ftr_in_list, fea_list)}
-                fd2 = {i: d[tr_step * batch_size:(tr_step + 1) * batch_size]
-                       for i, d in zip(bias_in_list, biases_list)}
-                fd3 = {lbl_in: y_train[tr_step * batch_size:(tr_step + 1) * batch_size],
-                       msk_in: train_mask[tr_step * batch_size:(tr_step + 1) * batch_size],
-                       is_train: True,
-                       attn_drop: 0.6,
-                       ffd_drop: 0.6}
-                fd = fd1
-                fd.update(fd2)
-                fd.update(fd3)
-                _, loss_value_tr, acc_tr, att_val_train = sess.run([train_op, loss, accuracy, att_val],
-                                                                   feed_dict=fd)
-                train_loss_avg += loss_value_tr
-                train_acc_avg += acc_tr
-
-                # add！！！！！！！！！！！！！！！！！！！！
-                # train_pre_avg += pre_tr
-                # train_rec_avg += rec_tr
-                # train_f1_avg += f1_tr
-
-                tr_step += 1
-
-            vl_step = 0
-            vl_size = fea_list[0].shape[0]
-            # =============   val       =================
-            while vl_step * batch_size < vl_size:
-                # fd1 = {ftr_in: features[vl_step * batch_size:(vl_step + 1) * batch_size]}
-                fd1 = {i: d[vl_step * batch_size:(vl_step + 1) * batch_size]
-                       for i, d in zip(ftr_in_list, fea_list)}
-                fd2 = {i: d[vl_step * batch_size:(vl_step + 1) * batch_size]
-                       for i, d in zip(bias_in_list, biases_list)}
-                fd3 = {lbl_in: y_val[vl_step * batch_size:(vl_step + 1) * batch_size],
-                       msk_in: val_mask[vl_step * batch_size:(vl_step + 1) * batch_size],
-                       is_train: False,
-                       attn_drop: 0.0,
-                       ffd_drop: 0.0}
-          
-                fd = fd1
-                fd.update(fd2)
-                fd.update(fd3)
-                loss_value_vl, acc_vl = sess.run([loss, accuracy],
-                                                 feed_dict=fd)
-                val_loss_avg += loss_value_vl
-                val_acc_avg += acc_vl
-                vl_step += 1
-
-                # add！！！！！！！！！！！！！！！！！！！
-                # val_pre_avg += pre_vl
-                # val_rec_avg += rec_vl
-                # val_f1_avg += f1_vl
-
-
-            # import pdb; pdb.set_trace()
-            print('Epoch: {}, att_val: {}'.format(epoch, np.mean(att_val_train, axis=0)))
-            print('Training: loss = %.5f, acc = %.5f | Val: loss = %.5f, acc = %.5f' %
-                  (train_loss_avg / tr_step, train_acc_avg / tr_step,
-                   val_loss_avg / vl_step, val_acc_avg / vl_step))
-
-            if val_acc_avg / vl_step >= vacc_mx or val_loss_avg / vl_step <= vlss_mn:
-                if val_acc_avg / vl_step >= vacc_mx and val_loss_avg / vl_step <= vlss_mn:
-                    vacc_early_model = val_acc_avg / vl_step
-                    vlss_early_model = val_loss_avg / vl_step
-                    saver.save(sess, checkpt_file)
-                vacc_mx = np.max((val_acc_avg / vl_step, vacc_mx))
-                vlss_mn = np.min((val_loss_avg / vl_step, vlss_mn))
-                curr_step = 0
-            else:
-                curr_step += 1
-                if curr_step == patience:
-                    print('Early stop! Min loss: ', vlss_mn,
-                          ', Max accuracy: ', vacc_mx)
-                    print('Early stop model validation loss: ',
-                          vlss_early_model, ', accuracy: ', vacc_early_model)
-                    break
+        with tf.device("/gpu:0"):
+            sess.run(init_op)
 
             train_loss_avg = 0
             train_acc_avg = 0
             val_loss_avg = 0
             val_acc_avg = 0
 
-            # add！！！！！！！！！！！！！！！！！！！！！！！！！
-            # add！！！！！！！！！！！！！！！！！！！！！！！！！
-            # train_pre_avg = 0
-            # train_rec_avg = 0
-            # train_f1_avg = 0
-            # val_pre_avg = 0
-            # val_rec_avg = 0
-            # val_f1_avg = 0
+            for epoch in range(nb_epochs):
+                tr_step = 0
 
+                tr_size = fea_list[0].shape[0]
+                # ================   training    ============
+                while tr_step * batch_size < tr_size:
 
-        saver.restore(sess, checkpt_file)
-        print('load model from : {}'.format(checkpt_file))
-        ts_size = fea_list[0].shape[0]
-        ts_step = 0
-        ts_loss = 0.0
-        ts_acc = 0.0
+                    fd1 = {i: d[tr_step * batch_size:(tr_step + 1) * batch_size]
+                           for i, d in zip(ftr_in_list, fea_list)}
+                    fd2 = {i: d[tr_step * batch_size:(tr_step + 1) * batch_size]
+                           for i, d in zip(bias_in_list, biases_list)}
+                    fd3 = {lbl_in: y_train[tr_step * batch_size:(tr_step + 1) * batch_size],
+                           msk_in: train_mask[tr_step * batch_size:(tr_step + 1) * batch_size],
+                           is_train: True,
+                           attn_drop: 0.6,
+                           ffd_drop: 0.6}
+                    fd = fd1
+                    fd.update(fd2)
+                    fd.update(fd3)
+                    _, loss_value_tr, acc_tr, att_val_train = sess.run([train_op, loss, accuracy, att_val],
+                                                                       feed_dict=fd)
+                    train_loss_avg += loss_value_tr
+                    train_acc_avg += acc_tr
+                    tr_step += 1
 
-        # add！！！！！！！！！！！！！！！！！！！！！
-        # ts_pre = 0.0
-        # ts_rec = 0.0
-        # ts_f1 = 0.0
+                vl_step = 0
+                vl_size = fea_list[0].shape[0]
+                # =============   val       =================
+                while vl_step * batch_size < vl_size:
+                    # fd1 = {ftr_in: features[vl_step * batch_size:(vl_step + 1) * batch_size]}
+                    fd1 = {i: d[vl_step * batch_size:(vl_step + 1) * batch_size]
+                           for i, d in zip(ftr_in_list, fea_list)}
+                    fd2 = {i: d[vl_step * batch_size:(vl_step + 1) * batch_size]
+                           for i, d in zip(bias_in_list, biases_list)}
+                    fd3 = {lbl_in: y_val[vl_step * batch_size:(vl_step + 1) * batch_size],
+                           msk_in: val_mask[vl_step * batch_size:(vl_step + 1) * batch_size],
+                           is_train: False,
+                           attn_drop: 0.0,
+                           ffd_drop: 0.0}
 
-        while ts_step * batch_size < ts_size:
-            # fd1 = {ftr_in: features[ts_step * batch_size:(ts_step + 1) * batch_size]}
-            fd1 = {i: d[ts_step * batch_size:(ts_step + 1) * batch_size]
-                   for i, d in zip(ftr_in_list, fea_list)}
-            fd2 = {i: d[ts_step * batch_size:(ts_step + 1) * batch_size]
-                   for i, d in zip(bias_in_list, biases_list)}
-            fd3 = {lbl_in: y_test[ts_step * batch_size:(ts_step + 1) * batch_size],
-                   msk_in: test_mask[ts_step * batch_size:(ts_step + 1) * batch_size],
-            
-                   is_train: False,
-                   attn_drop: 0.0,
-                   ffd_drop: 0.0}
-        
-            fd = fd1
-            fd.update(fd2)
-            fd.update(fd3)
-            loss_value_ts, acc_ts, jhy_final_embedding, pre_ts, lab_ts = sess.run([loss, accuracy, final_embedding, predict, label],
-                                                                  feed_dict=fd)
-            ts_loss += loss_value_ts
-            ts_acc += acc_ts
-            ts_step += 1
+                    fd = fd1
+                    fd.update(fd2)
+                    fd.update(fd3)
+                    loss_value_vl, acc_vl = sess.run([loss, accuracy],
+                                                     feed_dict=fd)
+                    val_loss_avg += loss_value_vl
+                    val_acc_avg += acc_vl
+                    vl_step += 1
 
-            # add！！！！！！！！！！！！！！！！！！！！！！！！
-            # ts_pre += pre_ts
-            # ts_rec += rec_ts
-            # ts_f1 += f1_ts
+                # import pdb; pdb.set_trace()
+                print('Epoch: {}, att_val: {}'.format(epoch, np.mean(att_val_train, axis=0)))
+                print('Training: loss = %.5f, acc = %.5f | Val: loss = %.5f, acc = %.5f' %
+                      (train_loss_avg / tr_step, train_acc_avg / tr_step,
+                       val_loss_avg / vl_step, val_acc_avg / vl_step))
 
-            np.savetxt("result/10/pre_ts.txt", pre_ts, fmt="%d")
-            np.savetxt("result/10/lab_ts.txt", lab_ts, fmt="%d")
-            np.savetxt("result/10/arg_pre.txt", jhy_final_embedding)
+                if val_acc_avg / vl_step >= vacc_mx or val_loss_avg / vl_step <= vlss_mn:
+                    if val_acc_avg / vl_step >= vacc_mx and val_loss_avg / vl_step <= vlss_mn:
+                        vacc_early_model = val_acc_avg / vl_step
+                        vlss_early_model = val_loss_avg / vl_step
+                        saver.save(sess, checkpt_file)
+                    vacc_mx = np.max((val_acc_avg / vl_step, vacc_mx))
+                    vlss_mn = np.min((val_loss_avg / vl_step, vlss_mn))
+                    curr_step = 0
+                else:
+                    curr_step += 1
+                    if curr_step == patience:
+                        print('Early stop! Min loss: ', vlss_mn,
+                              ', Max accuracy: ', vacc_mx)
+                        print('Early stop model validation loss: ',
+                              vlss_early_model, ', accuracy: ', vacc_early_model)
+                        break
 
-        print('Test loss:', ts_loss / ts_step,
-              '; Test accuracy:', ts_acc / ts_step)
-        # add！！！！！！！！！！！！！！！！！！！！！！！
-        # print('Test loss:', ts_loss/ts_step, '; Test accuracy:', ts_acc/ts_step, '; Test precision:', ts_pre/ts_step, '; Test recall:', ts_rec/ts_step, '; Test fmeasure:', ts_f1/ts_step)
+                train_loss_avg = 0
+                train_acc_avg = 0
+                val_loss_avg = 0
+                val_acc_avg = 0
 
+            saver.restore(sess, checkpt_file)
+            print('load model from : {}'.format(checkpt_file))
+            ts_size = fea_list[0].shape[0]
+            ts_step = 0
+            ts_loss = 0.0
+            ts_acc = 0.0
 
-        print('start knn, kmean.....')
-        xx = np.expand_dims(jhy_final_embedding, axis=0)[test_mask]
-  
-        from numpy import linalg as LA
+            while ts_step * batch_size < ts_size:
+                # fd1 = {ftr_in: features[ts_step * batch_size:(ts_step + 1) * batch_size]}
+                fd1 = {i: d[ts_step * batch_size:(ts_step + 1) * batch_size]
+                       for i, d in zip(ftr_in_list, fea_list)}
+                fd2 = {i: d[ts_step * batch_size:(ts_step + 1) * batch_size]
+                       for i, d in zip(bias_in_list, biases_list)}
+                fd3 = {lbl_in: y_test[ts_step * batch_size:(ts_step + 1) * batch_size],
+                       msk_in: test_mask[ts_step * batch_size:(ts_step + 1) * batch_size],
 
-        # xx = xx / LA.norm(xx, axis=1)
-        yy = y_test[test_mask]
+                       is_train: False,
+                       attn_drop: 0.0,
+                       ffd_drop: 0.0}
 
-        print('xx: {}, yy: {}'.format(xx.shape, yy.shape))
-        from jhyexp import my_KNN, my_Kmeans#, my_TSNE, my_Linear
+                fd = fd1
+                fd.update(fd2)
+                fd.update(fd3)
+                loss_value_ts, acc_ts, jhy_final_embedding, pre_ts, lab_ts = sess.run([loss, accuracy, final_embedding, predict, label],
+                                                                      feed_dict=fd)
+                ts_loss += loss_value_ts
+                ts_acc += acc_ts
+                ts_step += 1
 
-        my_KNN(xx, yy)
-        my_Kmeans(xx, yy)
+                np.savetxt("result/{}/pre_ts.txt".format(cates), pre_ts, fmt="%d")
+                np.savetxt("result/{}/lab_ts.txt".format(cates), lab_ts, fmt="%d")
+                np.savetxt("result/{}/arg_pre.txt".format(cates), jhy_final_embedding)
 
-        sess.close()
+            print('Test loss:', ts_loss / ts_step, '; Test accuracy:', ts_acc / ts_step)
+
+            # print('start knn, kmean.....')
+            # xx = np.expand_dims(jhy_final_embedding, axis=0)[test_mask]
+            #
+            # from numpy import linalg as LA
+            #
+            # # xx = xx / LA.norm(xx, axis=1)
+            # yy = y_test[test_mask]
+            #
+            # print('xx: {}, yy: {}'.format(xx.shape, yy.shape))
+            # from jhyexp import my_KNN, my_Kmeans#, my_TSNE, my_Linear
+            #
+            # my_KNN(xx, yy)
+            # my_Kmeans(xx, yy)
+
+            sess.close()
